@@ -3,8 +3,6 @@
 
 #include <stdint.h> // uint32_t
 
-#define ERROR_RET -989898989
-
 struct pull_history_steps {
     uint64_t first_clock, last_clock;
     int64_t start_position;

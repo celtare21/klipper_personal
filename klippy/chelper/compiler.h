@@ -43,4 +43,15 @@
             (((x) + ((__divisor) / 2)) / (__divisor));  \
         })
 
+#define MIN(a, b)({                \
+            __auto_type __a = (a); \
+            __auto_type __b = (b); \
+            __a < __b ? __a : __b; \
+        })
+#define MAX(a, b)({                \
+            __auto_type __a = (a); \
+            __auto_type __b = (b); \
+            __a > __b ? __a : __b; \
+        })
+
 #endif // compiler.h
