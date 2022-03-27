@@ -19,6 +19,7 @@ SSE_FLAGS = "-mfpmath=sse -msse2"
 SOURCE_FILES = [
     'pyhelper.c', 'serialqueue.c', 'stepcompress.c', 'itersolve.c', 'trapq.c',
     'pollreactor.c', 'msgblock.c', 'trdispatch.c',
+    'accelcombine.c', 'accelgroup.c', 'moveq.c', 'scurve.c', 'trapbuild.c',
     'kin_cartesian.c', 'kin_corexy.c', 'kin_corexz.c', 'kin_delta.c',
     'kin_polar.c', 'kin_rotary_delta.c', 'kin_winch.c', 'kin_extruder.c',
     'kin_shaper.c',
@@ -26,6 +27,7 @@ SOURCE_FILES = [
 DEST_LIB = "c_helper.so"
 OTHER_FILES = [
     'list.h', 'serialqueue.h', 'stepcompress.h', 'itersolve.h', 'pyhelper.h',
+    'accelcombine.h', 'accelgroup.h', 'moveq.h', 'scurve.h', 'trapbuild.h',
     'trapq.h', 'pollreactor.h', 'msgblock.h'
 ]
 
@@ -67,12 +69,37 @@ defs_itersolve = """
     double itersolve_get_commanded_pos(struct stepper_kinematics *sk);
 """
 
+defs_moveq = """
+    struct move_accel_decel {
+        double accel_t, accel_offset_t, total_accel_t;
+        double cruise_t;
+        double decel_t, decel_offset_t, total_decel_t;
+        double start_accel_v, cruise_v;
+        double effective_accel, effective_decel;
+        int accel_order;
+    };
+    struct move_accel_decel *move_accel_decel_alloc(void);
+
+    struct moveq *moveq_alloc(void);
+    void moveq_reset(struct moveq *mq);
+    int moveq_add(struct moveq *mq, double move_d
+        , double junction_max_v2, double max_cruise_v2
+        , int accel_order, double accel, double smoothed_accel
+        , double jerk, double min_jerk_limit_time);
+    int moveq_plan(struct moveq *mq, int lazy);
+    int moveq_getmove(struct moveq *mq
+        , struct move_accel_decel *accel_decel);
+"""
+
 defs_trapq = """
-    void trapq_append(struct trapq *tq, double print_time
-        , double accel_t, double cruise_t, double decel_t
+    void trapq_append(struct trapq *tq, double print_time, int accel_order
+        , double accel_t, double accel_offset_t, double total_accel_t
+        , double cruise_t
+        , double decel_t, double decel_offset_t, double total_decel_t
         , double start_pos_x, double start_pos_y, double start_pos_z
         , double axes_r_x, double axes_r_y, double axes_r_z
-        , double start_v, double cruise_v, double accel);
+        , double start_accel_v, double cruise_v
+        , double effective_accel, double effective_decel);
     struct trapq *trapq_alloc(void);
     void trapq_free(struct trapq *tq);
     void trapq_free_moves(struct trapq *tq, double print_time);
@@ -196,7 +223,7 @@ defs_all = [
     defs_itersolve, defs_trapq, defs_trdispatch,
     defs_kin_cartesian, defs_kin_corexy, defs_kin_corexz, defs_kin_delta,
     defs_kin_polar, defs_kin_rotary_delta, defs_kin_winch, defs_kin_extruder,
-    defs_kin_shaper,
+    defs_kin_shaper, defs_moveq,
 ]
 
 # Update filenames to an absolute path
