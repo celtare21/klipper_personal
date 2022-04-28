@@ -3,8 +3,6 @@
 
 #include <stdint.h> // uint32_t
 
-#define ERROR_RET -989898989
-
 struct stepcompress *stepcompress_alloc(uint32_t oid);
 void stepcompress_fill(struct stepcompress *sc, uint32_t max_error
                        , uint32_t invert_sdir, int32_t queue_step_msgtag

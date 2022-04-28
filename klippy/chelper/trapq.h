@@ -2,6 +2,7 @@
 #define TRAPQ_H
 
 #include "list.h" // list_node
+#include "scurve.h"  // scurve
 
 struct coord {
     union {
@@ -14,8 +15,8 @@ struct coord {
 
 struct move {
     double print_time, move_t;
-    double start_v, half_accel;
     struct coord start_pos, axes_r;
+    struct scurve s;
 
     struct list_node node;
 };
@@ -25,11 +26,14 @@ struct trapq {
 };
 
 struct move *move_alloc(void);
-void trapq_append(struct trapq *tq, double print_time
-                  , double accel_t, double cruise_t, double decel_t
+void trapq_append(struct trapq *tq, double print_time, int accel_order
+                  , double accel_t, double accel_offset_t, double total_accel_t
+                  , double cruise_t
+                  , double decel_t, double decel_offset_t, double total_decel_t
                   , double start_pos_x, double start_pos_y, double start_pos_z
                   , double axes_r_x, double axes_r_y, double axes_r_z
-                  , double start_v, double cruise_v, double accel);
+                  , double start_accel_v, double cruise_v
+                  , double effective_accel, double effective_decel);
 double move_get_distance(struct move *m, double move_time);
 struct coord move_get_coord(struct move *m, double move_time);
 struct trapq *trapq_alloc(void);

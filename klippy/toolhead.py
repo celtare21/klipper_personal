@@ -16,7 +16,9 @@ class Move:
         self.toolhead = toolhead
         self.start_pos = tuple(start_pos)
         self.end_pos = tuple(end_pos)
+        self.accel_order = 2
         self.accel = toolhead.max_accel
+        self.accel_to_decel = toolhead.max_accel_to_decel
         self.timing_callbacks = []
         velocity = min(speed, toolhead.max_velocity)
         self.is_kinematic_move = True
@@ -31,7 +33,7 @@ class Move:
             inv_move_d = 0.
             if move_d:
                 inv_move_d = 1. / move_d
-            self.accel = 99999999.9
+            self.accel = self.accel_to_decel = 99999999.9
             velocity = speed
             self.is_kinematic_move = False
         else:
@@ -45,13 +47,15 @@ class Move:
         self.max_cruise_v2 = velocity**2
         self.delta_v2 = 2.0 * move_d * self.accel
         self.max_smoothed_v2 = 0.
-        self.smooth_delta_v2 = 2.0 * move_d * toolhead.max_accel_to_decel
+        self.smooth_delta_v2 = 2.0 * move_d * self.accel_to_decel
+        self.junction_max_v2 = 0.
     def limit_speed(self, speed, accel):
         speed2 = speed**2
         if speed2 < self.max_cruise_v2:
             self.max_cruise_v2 = speed2
             self.min_move_t = self.move_d / speed
         self.accel = min(self.accel, accel)
+        self.accel_to_decel = min(self.accel_to_decel, accel)
         self.delta_v2 = 2.0 * self.move_d * self.accel
         self.smooth_delta_v2 = min(self.smooth_delta_v2, self.delta_v2)
     def move_error(self, msg="Move out of range"):
@@ -81,11 +85,13 @@ class Move:
         prev_move_centripetal_v2 = (.5 * prev_move.move_d * tan_theta_d2
                                     * prev_move.accel)
         # Apply limits
-        self.max_start_v2 = min(
+        self.junction_max_v2 = min(
             R * self.accel, R * prev_move.accel,
             move_centripetal_v2, prev_move_centripetal_v2,
-            extruder_v2, self.max_cruise_v2, prev_move.max_cruise_v2,
-            prev_move.max_start_v2 + prev_move.delta_v2)
+            extruder_v2, self.max_cruise_v2, prev_move.max_cruise_v2)
+        self.max_start_v2 = min(
+            self.junction_max_v2
+            , prev_move.max_start_v2 + prev_move.delta_v2)
         self.max_smoothed_v2 = min(
             self.max_start_v2
             , prev_move.max_smoothed_v2 + prev_move.smooth_delta_v2)
@@ -96,14 +102,16 @@ class Move:
         decel_d = (cruise_v2 - end_v2) * half_inv_accel
         cruise_d = self.move_d - accel_d - decel_d
         # Determine move velocities
-        self.start_v = start_v = math.sqrt(start_v2)
+        self.start_accel_v = start_v = math.sqrt(start_v2)
         self.cruise_v = cruise_v = math.sqrt(cruise_v2)
-        self.end_v = end_v = math.sqrt(end_v2)
+        end_v = math.sqrt(end_v2)
         # Determine time spent in each portion of move (time is the
         # distance divided by average velocity)
-        self.accel_t = accel_d / ((start_v + cruise_v) * 0.5)
+        self.total_accel_t = self.accel_t = 2. * accel_d / (start_v + cruise_v)
         self.cruise_t = cruise_d / cruise_v
-        self.decel_t = decel_d / ((end_v + cruise_v) * 0.5)
+        self.total_decel_t = self.decel_t = 2. * decel_d / (end_v + cruise_v)
+        self.accel_offset_t = self.decel_offset_t = 0.
+        self.effective_accel = self.effective_decel = self.accel
 
 LOOKAHEAD_FLUSH_TIME = 0.250
 
@@ -113,18 +121,20 @@ class MoveQueue:
     def __init__(self, toolhead):
         self.toolhead = toolhead
         self.queue = []
-        self.junction_flush = LOOKAHEAD_FLUSH_TIME
+        self.junction_flush = self._LOOKAHEAD_FLUSH_TIME = LOOKAHEAD_FLUSH_TIME
     def reset(self):
         del self.queue[:]
-        self.junction_flush = LOOKAHEAD_FLUSH_TIME
+        self.junction_flush = self._LOOKAHEAD_FLUSH_TIME
     def set_flush_time(self, flush_time):
         self.junction_flush = flush_time
+    def is_empty(self):
+        return not self.queue
     def get_last(self):
         if self.queue:
             return self.queue[-1]
         return None
     def flush(self, lazy=False):
-        self.junction_flush = LOOKAHEAD_FLUSH_TIME
+        self.junction_flush = self._LOOKAHEAD_FLUSH_TIME
         update_flush_count = lazy
         queue = self.queue
         flush_count = len(queue)
@@ -316,11 +326,14 @@ class ToolHead:
         for move in moves:
             if move.is_kinematic_move:
                 self.trapq_append(
-                    self.trapq, next_move_time,
-                    move.accel_t, move.cruise_t, move.decel_t,
+                    self.trapq, next_move_time, move.accel_order,
+                    move.accel_t, move.accel_offset_t, move.total_accel_t,
+                    move.cruise_t,
+                    move.decel_t, move.decel_offset_t, move.total_decel_t,
                     move.start_pos[0], move.start_pos[1], move.start_pos[2],
                     move.axes_r[0], move.axes_r[1], move.axes_r[2],
-                    move.start_v, move.cruise_v, move.accel)
+                    move.start_accel_v, move.cruise_v,
+                    move.effective_accel, move.effective_decel)
             if move.axes_d[3]:
                 self.extruder.move(next_move_time, move)
             next_move_time = (next_move_time + move.accel_t
@@ -492,7 +505,7 @@ class ToolHead:
             self.print_time, max(buffer_time, 0.), self.print_stall)
     def check_busy(self, eventtime):
         est_print_time = self.mcu.estimated_print_time(eventtime)
-        lookahead_empty = not self.move_queue.queue
+        lookahead_empty = self.move_queue.is_empty()
         return self.print_time, est_print_time, lookahead_empty
     def get_status(self, eventtime):
         print_time = self.print_time
@@ -515,6 +528,12 @@ class ToolHead:
         return self.kin
     def get_trapq(self):
         return self.trapq
+    def get_move_queue(self):
+        return self.move_queue
+    def replace_move_queue(self, new_move_queue):
+        if self.move_queue and not self.move_queue.is_empty():
+            self.move_queue.flush()
+        self.move_queue = new_move_queue
     def register_step_generator(self, handler):
         self.step_generators.append(handler)
     def note_step_generation_scan_time(self, delay, old_delay=0.):

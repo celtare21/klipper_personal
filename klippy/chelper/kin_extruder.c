@@ -9,7 +9,7 @@
 #include <string.h> // memset
 #include "compiler.h" // __visible
 #include "itersolve.h" // struct stepper_kinematics
-#include "pyhelper.h" // errorf
+#include "scurve.h" // scurve_tn_antiderivative
 #include "trapq.h" // move_get_distance
 
 // Without pressure advance, the extruder stepper position is:
@@ -26,28 +26,29 @@
 //         / ((smooth_time/2)**2))
 
 // Calculate the definitive integral of the motion formula:
-//   position(t) = base + t * (start_v + t * half_accel)
+//   position(t) = extrude_pos + s(t), with s(t) - Bezier S-Curve
 static double
-extruder_integrate(double base, double start_v, double half_accel
+extruder_integrate(double extrude_pos, const struct scurve *s
                    , double start, double end)
 {
-    double half_v = .5 * start_v, sixth_a = (1. / 3.) * half_accel;
-    double si = start * (base + start * (half_v + start * sixth_a));
-    double ei = end * (base + end * (half_v + end * sixth_a));
-    return ei - si;
+    // Calculate base position and velocity with pressure advance
+    double base = extrude_pos * (end - start);
+    double integral = scurve_tn_antiderivative(s, 0, end)
+        - scurve_tn_antiderivative(s, 0, start);
+    return base + integral;
 }
 
 // Calculate the definitive integral of time weighted position:
-//   weighted_position(t) = t * (base + t * (start_v + t * half_accel))
+//   weighted_position(t) = t * (extrude_pos + s(t))
 static double
-extruder_integrate_time(double base, double start_v, double half_accel
+extruder_integrate_time(double extrude_pos, const struct scurve *s
                         , double start, double end)
 {
-    double half_b = .5 * base, third_v = (1. / 3.) * start_v;
-    double eighth_a = .25 * half_accel;
-    double si = start * start * (half_b + start * (third_v + start * eighth_a));
-    double ei = end * end * (half_b + end * (third_v + end * eighth_a));
-    return ei - si;
+    // Calculate base position and velocity with pressure advance
+    double base = .5 * extrude_pos * (end * end - start * start);
+    double integral = scurve_tn_antiderivative(s, 1, end)
+        - scurve_tn_antiderivative(s, 1, start);
+    return base + integral;
 }
 
 // Calculate the definitive integral of extruder for a given move
@@ -59,14 +60,14 @@ pa_move_integrate(struct move *m, double base, double start, double end,
         start = 0.;
     if (end > m->move_t)
         end = m->move_t;
-    // Calculate base position and velocity with pressure advance
+    double extrude_pos = base;
+    double extrude_r = m->axes_r.x;
     double pressure_advance = m->axes_r.y;
-    base += pressure_advance * m->start_v;
-    double start_v = m->start_v + pressure_advance * 2. * m->half_accel;
-    // Calculate definitive integral
-    double ha = m->half_accel;
-    double iext = extruder_integrate(base, start_v, ha, start, end);
-    double wgt_ext = extruder_integrate_time(base, start_v, ha, start, end);
+    struct scurve s;
+    scurve_copy_scaled(&m->s, extrude_r, &s);
+    extrude_pos += scurve_add_deriv(&m->s, extrude_r * pressure_advance, &s);
+    double iext = extruder_integrate(extrude_pos, &s, start, end);
+    double wgt_ext = extruder_integrate_time(extrude_pos, &s, start, end);
     return wgt_ext - time_offset * iext;
 }
 
@@ -110,7 +111,7 @@ extruder_calc_position(struct stepper_kinematics *sk, struct move *m
     double hst = es->half_smooth_time;
     if (!hst)
         // Pressure advance not enabled
-        return m->start_pos.x + move_get_distance(m, move_time);
+        return m->start_pos.x + m->axes_r.x * move_get_distance(m, move_time);
     // Apply pressure advance and average over smooth_time
     double area = pa_range_integrate(m, move_time, hst);
     return m->start_pos.x + area * es->inv_half_smooth_time2;

@@ -1446,6 +1446,33 @@ the [command reference](G-Codes.md#resonance-compensation).
 #   parameter requires no tuning and should not be changed.
 ```
 
+## [scurve]
+
+S-Curve acceleration and jerk-limiting motion planning.
+
+```
+[scurve]
+#acceleration_order: 4
+#   This parameter determines the acceleration method. Use 2 for
+#   constant acceleration, 4 for a 4th order position s-curve
+#   acceleration, or 6 for 6th order position s-curve acceleration.
+#   Note that values 4 and 6 will slow down the printer. Be sure to read
+#   docs/Resonance_Compensation.md before changing this parameter.
+#   The default is 4.
+#min_jerk_limit_time: 0.02
+#   Minimum acceleration (and deceleration) time (in seconds) to enable full
+#   kinematic jerk limiting. The default is 0.02, which should work well in
+#   most circumstances. Another possiblity is to set this parameter to a value
+#   equal to 1.0 / max_ringing_frequency.
+#   Only has effect if acceleration_order is greater than 2.
+#max_jerk:
+#   Maximum kinematic jerk (in mm/s^3). Notice this is not the same as
+#   the max velocity jump which is sometimes configured by other firmware!
+#   The default value is max_accel * 30 if min_jerk_limit_time is not set,
+#   otherwise the default value is computed from min_jerk_limit_time parameter.
+#   Only has effect if acceleration_order is greater than 2.
+```
+
 ## [adxl345]
 
 Support for ADXL345 accelerometers. This support allows one to query

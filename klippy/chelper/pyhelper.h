@@ -1,6 +1,8 @@
 #ifndef PYHELPER_H
 #define PYHELPER_H
 
+#define ERROR_RET -989898989
+
 double get_monotonic(void);
 struct timespec fill_time(double time);
 void set_python_logging_callback(void (*func)(const char *));
